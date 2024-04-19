@@ -1,0 +1,8 @@
+build/*
+core*
+*.bin
+a.out
+a
+b
+c
+*.swp
