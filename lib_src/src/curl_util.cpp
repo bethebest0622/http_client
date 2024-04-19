@@ -3,35 +3,6 @@
 
 #define CURL_SIZE 16
 
-void util::curl_util::Show(const rapidjson::Document& doc, const std::string& topic) {
-  printf("================================%s================================\n", topic.c_str());
-  std::cout << ToStr(doc) << std::endl;
-}
-
-void util::curl_util::Show(const rapidjson::Value & val, const std::string& topic) {
-  printf("================================%s================================\n", topic.c_str());
-  std::cout << ToStr(val) << std::endl;
-}
-
-std::string util::curl_util::ToStr(const rapidjson::Document& doc, const std::string & topic) {
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  doc.Accept(writer);
-  return topic.empty() ? buffer.GetString() : topic + ":" + buffer.GetString();
-}
-
-std::string util::curl_util::ToStr(const rapidjson::Value & doc, const std::string & topic) {
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-  doc.Accept(writer);
-  return topic.empty() ? buffer.GetString() : topic + ":" + buffer.GetString();
-}
-
-inline size_t curl_cb(char *content, size_t size, size_t nmemb, std::string* ptr) {
-  ptr->append(content, size * nmemb);
-  return size * nmemb;
-}
-
 util::curl_util::Handler::Handler(const util::curl_util::Handler & cd) {
   if (this != &cd) {
     ptr_ = cd.ptr_;
@@ -78,89 +49,39 @@ util::curl_util::HttpClient::HttpClient(const std::string & host) : etp_(CURL_SI
   };
 }
 
+void util::curl_util::HttpClient::async_execute(const FType & f, drogon::HttpMethod type, const std::string & path, const std::vector<std::pair<std::string, std::string>> &extra_http_header, const std::string & body) {
+  auto & h = GetHandler();
+  std::lock_guard<std::mutex> lock(h.mut_);
+  h.req_ptr_->setMethod(type);
+  h.req_ptr_->setPath(path);
+  if (type != drogon::HttpMethod::Get) {
+    if (!body.empty()) h.req_ptr_->setBody(body);
+  }
+  for (const auto & [key, value] : extra_http_header) {
+    h.req_ptr_->addHeader(key, value);
+  }
+
+  h.req_ptr_->setContentTypeString("application/json");
+
+  // INFO("host = %s, body = %s, path = %s\n", h.ptr_->getHost().c_str(), h.req_ptr_->bodyData(), path.c_str());
+  // util::common_util::PrintMap(h.req_ptr_->getHeaders(), "header");
+  timeval t;
+  gettimeofday(&t, NULL);
+  h.ptr_->sendRequest(h.req_ptr_, [f, t] (const drogon::ReqResult & rq, const drogon::HttpResponsePtr & hr) {
+    timeval t1;
+    gettimeofday(&t1, NULL);
+    f(rq, hr);
+    int lat = (t1.tv_sec - t.tv_sec) * 1000000 + t1.tv_usec - t.tv_usec;
+    printf("async latency: %ld %ld %ld %ld %d\n", t.tv_sec, t.tv_usec, t1.tv_sec, t1.tv_usec, lat);
+  });
+  etp_.start();
+}
+
 util::curl_util::HttpClient::~HttpClient() {}
 
 util::curl_util::HType & util::curl_util::HttpClient::GetHandler() {
   return handlers_.at(handler_idx_.fetch_add(1) % CURL_SIZE);
 }
-
-// util::curl_util::MyJson util::curl_util::HttpClient::Get(const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header) {
-//   return sync_execute(drogon::HttpMethod::Get, path, extra_http_header);
-// }
-//
-// util::curl_util::MyJson util::curl_util::HttpClient::Post(const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string &post_data) {
-//   return sync_execute(drogon::HttpMethod::Post, path, extra_http_header, post_data);
-// }
-//
-// util::curl_util::MyJson util::curl_util::HttpClient::Put(const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string &post_data) {
-//   return sync_execute(drogon::HttpMethod::Put, path, extra_http_header, post_data);
-// }
-//
-// util::curl_util::MyJson util::curl_util::HttpClient::Delete(const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string &post_data) {
-//   return sync_execute(drogon::HttpMethod::Delete, path, extra_http_header, post_data);
-// }
-//
-// void util::curl_util::HttpClient::Get(const RType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header) {
-//   return async_execute(std::bind(ff_, std::placeholders::_1, std::placeholders::_2, f, path), drogon::HttpMethod::Get, path, extra_http_header, "");
-// }
-//
-// void util::curl_util::HttpClient::Post(const RType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string &post_data) {
-//   return async_execute(std::bind(ff_, std::placeholders::_1, std::placeholders::_2, f, path), drogon::HttpMethod::Post, path, extra_http_header, post_data);
-// }
-//
-// void util::curl_util::HttpClient::Delete(const RType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string &post_data) {
-//   return async_execute(std::bind(ff_, std::placeholders::_1, std::placeholders::_2, f, path), drogon::HttpMethod::Delete, path, extra_http_header, post_data);
-// }
-//
-// void util::curl_util::HttpClient::Put(const RType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string &post_data) {
-//   return async_execute(std::bind(ff_, std::placeholders::_1, std::placeholders::_2, f, path), drogon::HttpMethod::Put, path, extra_http_header, post_data);
-// }
-//
-// void util::curl_util::HttpClient::Get(const FType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header) {
-//   return async_execute(f, drogon::HttpMethod::Get, path, extra_http_header, "");
-// }
-//
-// void util::curl_util::HttpClient::Post(const FType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string & body) {
-//   return async_execute(f, drogon::HttpMethod::Post, path, extra_http_header, body);
-// }
-//
-// void util::curl_util::HttpClient::Delete(const FType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string & body) {
-//   return async_execute(f, drogon::HttpMethod::Delete, path, extra_http_header, body);
-// }
-//
-// void util::curl_util::HttpClient::Put(const FType & f, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string & body) {
-//   return async_execute(f, drogon::HttpMethod::Put, path, extra_http_header, body);
-// }
-//
-// void util::curl_util::HttpClient::async_execute(const FType & f, drogon::HttpMethod type, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string & body) {
-//   auto & h = GetHandler();
-//   std::lock_guard<std::mutex> lock(h.mut_);
-//   h.req_ptr_->setMethod(type);
-//   h.req_ptr_->setPath(path);
-//   if (type != drogon::HttpMethod::Get) {
-//     if (!body.empty()) h.req_ptr_->setBody(body);
-//   }
-//   for (const auto & [key, value] : extra_http_header) h.req_ptr_->addHeader(key, value);
-//   const auto & m = h.req_ptr_->getHeaders();
-//   util::common_util::PrintMap(m, "header");
-//   h.ptr_->sendRequest(h.req_ptr_, f);
-//   etp_.start();
-// }
-//
-// util::curl_util::MyJson util::curl_util::HttpClient::sync_execute(drogon::HttpMethod type, const std::string & path, const std::unordered_map<std::string, std::string> &extra_http_header, const std::string & body) {
-//   sync_req_->setMethod(type);
-//   sync_req_->setPath(path);
-//   if (type != drogon::HttpMethod::Get) {
-//     if (!body.empty()) sync_req_->setBody(body);
-//   }
-//   for (const auto & [key, value] : extra_http_header) sync_req_->addHeader(key, value);
-//   const auto & [req_result, reponse_ptr] = sync_client_->sendRequest(sync_req_);
-//   if (req_result != drogon::ReqResult::Ok) EE("error while sending request to server! result: %d\n", int(req_result));
-//   MyJson d;
-//   if (d.Parse(reponse_ptr->getBody().data()).HasParseError()) ERROR("path:%s, parse:%s, error:%s\n", path.c_str(), reponse_ptr->getBody().data(), rapidjson::GetParseError_En(d.GetParseError()));
-//   return d;
-// }
-//
 
 util::curl_util::MyJson util::curl_util::HttpClient::Get(const std::string & path, const std::vector<std::pair<std::string, std::string>> &extra_http_header) {
   return sync_execute(drogon::HttpMethod::Get, path, extra_http_header);
@@ -208,34 +129,6 @@ void util::curl_util::HttpClient::Delete(const FType & f, const std::string & pa
 
 void util::curl_util::HttpClient::Put(const FType & f, const std::string & path, const std::vector<std::pair<std::string, std::string>> &extra_http_header, const std::string & body) {
   return async_execute(f, drogon::HttpMethod::Put, path, extra_http_header, body);
-}
-
-void util::curl_util::HttpClient::async_execute(const FType & f, drogon::HttpMethod type, const std::string & path, const std::vector<std::pair<std::string, std::string>> &extra_http_header, const std::string & body) {
-  auto & h = GetHandler();
-  std::lock_guard<std::mutex> lock(h.mut_);
-  h.req_ptr_->setMethod(type);
-  h.req_ptr_->setPath(path);
-  if (type != drogon::HttpMethod::Get) {
-    if (!body.empty()) h.req_ptr_->setBody(body);
-  }
-  for (const auto & [key, value] : extra_http_header) {
-    h.req_ptr_->addHeader(key, value);
-  }
-
-  h.req_ptr_->setContentTypeString("application/json");
-
-  // INFO("host = %s, body = %s, path = %s\n", h.ptr_->getHost().c_str(), h.req_ptr_->bodyData(), path.c_str());
-  // util::common_util::PrintMap(h.req_ptr_->getHeaders(), "header");
-  timeval t;
-  gettimeofday(&t, NULL);
-  h.ptr_->sendRequest(h.req_ptr_, [f, t] (const drogon::ReqResult & rq, const drogon::HttpResponsePtr & hr) {
-    timeval t1;
-    gettimeofday(&t1, NULL);
-    f(rq, hr);
-    int lat = (t1.tv_sec - t.tv_sec) * 1000000 + t1.tv_usec - t.tv_usec;
-    printf("async latency: %ld %ld %ld %ld %d\n", t.tv_sec, t.tv_usec, t1.tv_sec, t1.tv_usec, lat);
-  });
-  etp_.start();
 }
 
 util::curl_util::MyJson util::curl_util::HttpClient::sync_execute(drogon::HttpMethod type, const std::string & path, const std::vector<std::pair<std::string, std::string>> &extra_http_header, const std::string & body) {
@@ -332,4 +225,33 @@ std::string util::curl_util::url_transform(const std::string & s) {
     }
   }
   return r;
+}
+
+void util::curl_util::Show(const rapidjson::Document& doc, const std::string& topic) {
+  printf("================================%s================================\n", topic.c_str());
+  std::cout << ToStr(doc) << std::endl;
+}
+
+void util::curl_util::Show(const rapidjson::Value & val, const std::string& topic) {
+  printf("================================%s================================\n", topic.c_str());
+  std::cout << ToStr(val) << std::endl;
+}
+
+std::string util::curl_util::ToStr(const rapidjson::Document& doc, const std::string & topic) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  doc.Accept(writer);
+  return topic.empty() ? buffer.GetString() : topic + ":" + buffer.GetString();
+}
+
+std::string util::curl_util::ToStr(const rapidjson::Value & doc, const std::string & topic) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  doc.Accept(writer);
+  return topic.empty() ? buffer.GetString() : topic + ":" + buffer.GetString();
+}
+
+inline size_t curl_cb(char *content, size_t size, size_t nmemb, std::string* ptr) {
+  ptr->append(content, size * nmemb);
+  return size * nmemb;
 }
